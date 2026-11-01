@@ -11,7 +11,7 @@ from .detector import StreamDetector
 from .metrics import event_report
 from .stream import CHANNELS, server_metrics
 
-BARS = " ▁▂▃▄▅▆▇█"
+BARS = "▁▂▃▄▅▆▇█"
 
 
 def sparkline(values, width=100):
