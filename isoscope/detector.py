@@ -14,7 +14,7 @@ from .hstree import HalfSpaceTrees
 
 
 class StreamDetector:
-    def __init__(self, k=5.0, history=500, warmup_windows=1, **hst_kwargs):
+    def __init__(self, k=5.0, history=500, warmup_windows=1, min_run=2, **hst_kwargs):
         hst_kwargs.setdefault("window", 600)
         hst_kwargs.setdefault("depth", 12)
         hst_kwargs.setdefault("n_trees", 50)
@@ -24,6 +24,11 @@ class StreamDetector:
         # hold off alerting until the reference profile has seen at least one
         # full window; bump this if your first window isn't representative
         self.warmup = warmup_windows * self.model.window
+        # require a couple of low ticks in a row before alerting. one weird
+        # sample out of thousands is usually just noise, and it costs a
+        # single tick of latency on real events
+        self.min_run = min_run
+        self._run = 0
         self.t = 0
 
     def threshold(self):
@@ -42,7 +47,8 @@ class StreamDetector:
             return None, False
         s = float(np.log(raw + 1.0))
         thr = self.threshold()
-        flagged = thr is not None and self.t > self.warmup and s < thr
-        if not flagged:
+        low = thr is not None and self.t > self.warmup and s < thr
+        self._run = self._run + 1 if low else 0
+        if not low:
             self.history.append(s)
-        return s, flagged
+        return s, self._run >= self.min_run
