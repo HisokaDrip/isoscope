@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest
+scikit-learn  # only for the benchmark / comparison tests
