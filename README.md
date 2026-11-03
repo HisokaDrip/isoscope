@@ -7,6 +7,46 @@ Isolation-based anomaly detection written from scratch in NumPy. It has two halv
 
 I wanted to understand why isolation forest works so well for how dumb it sounds ("cut randomly until the point is alone"), and then whether the same trick holds up when you can't see the data in advance. It does, mostly.
 
+## how it works
+
+**isolation forest (`iforest.py`).** each tree is built on a random subsample of 256
+rows (`max_samples`). at every node it picks a random feature that still varies and a
+uniform random threshold between that feature's min and max, then recurses until a point
+is alone or the depth hits `ceil(log2(256)) = 8`. outliers sit in sparse regions, so random
+cuts separate them in only a few steps, while normal points need many. the depth cap is
+there because past that point the tree is mostly separating normal points from each other,
+which is useless here.
+
+to score, every sample walks down a tree at the same time: nodes are flat numpy arrays
+(`feature`, `threshold`, `left`, `right`, `size`), and each loop step moves all the
+not-yet-at-a-leaf samples one level down. when a sample stops at a leaf that still holds
+`n` points, `c(n)` (the average path length of an unsuccessful BST search) is added to
+estimate the depth of the subtree that was never built. the final score is the paper's
+`2 ** (-mean_path / c(256))`: near 1 is anomalous, about 0.5 or below is normal. the
+`predict` threshold is the `1 - contamination` quantile of the training scores.
+
+**half-space trees (`hstree.py`).** for streams you can't subsample in advance, so the
+trees are built before seeing any data. the first window of points is used to find each
+feature's range (padded by 10%) and scale inputs to roughly `[0, 1]`. each tree then
+splits a randomly offset box around the unit cube in half on a random dimension, down to a
+fixed depth. all trees live in `(n_trees, n_nodes)` arrays in heap order (children of `i`
+are `2i+1` and `2i+2`), so one update is `depth` vectorised steps across every tree.
+
+learning is just counting. each node has a `latest` count (current window, being filled)
+and a `ref` count (last complete window). every `window` points, `latest` becomes `ref`
+and a new empty `latest` starts. scoring walks a point down each tree, stops at the first
+node whose `ref` count is at or below `0.1 * window` (or at the leaf), and adds up
+`count * 2 ** level`. points in well-populated regions get a high score, so **low means
+weird**. since only the last complete window is kept, the model forgets old data, so after
+a level shift the new level stops looking anomalous once the reference window has filled
+up with it.
+
+**alerting (`detector.py`).** raw mass scores are very heavy tailed, so `StreamDetector`
+takes `log(score + 1)` and keeps a rolling history of recent non-alert scores. a tick is
+"low" when it falls below `median - 5 * MAD` of that history. it only alerts after 2 low
+ticks in a row and after the first full window of warmup. defaults are 50 trees, depth 12,
+and a 600-tick window, picked so the window covers the demo's 600-tick load cycle.
+
 ## running it
 
 Only numpy is needed. scikit-learn is optional and is used for the comparison column and a couple of tests.
